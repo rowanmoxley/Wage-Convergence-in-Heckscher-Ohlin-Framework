@@ -1,6 +1,14 @@
 # Wage-Convergence-in-Heckscher-Ohlin-Framework
 Research submitted to the Midwest Economics Association undergraduate research competition.
 
+## License
+
+The research paper is licensed under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/).  
+You are free to share and adapt the work, provided proper attribution is given.  
+The full license text is available in the [`LICENSE`](LICENSE) file.
+
+
+
 ## Introduction
 ABSTRACT. This paper aims to empirically confirm the wage convergence conjecture within neoclassical economics’ Hecksher-Ohlin model in the Puerto Rican manufacturing industry over the period 1950-1987. Using time series econometrics, I isolate the effects of increased trade liberalization on Puerto Rican manufacturing wages. Log-first-differencing technique is applied due to nonstationarity in the data. Results indicate that wage convergence is observed, but shows little correlation with movements in U.S. gross national product after differencing. These results indicate that wage convergence is observed but not due to increased trade liberalization or shock effects, and highlights the limitations of real-world applications of neoclassical economic theory.
 
