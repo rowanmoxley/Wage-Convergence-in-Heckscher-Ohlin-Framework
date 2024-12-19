@@ -19,7 +19,7 @@ Used ordinary least squares (OLS) estimates with Newey-West heteroskedasticity-a
 2. ACF/PACF of both series (highly persistent, 8+ lags show autocorrelation), 
 3. Ljung-Box tests (reject at all lags), 
 4. Dickey-Fuller + Koyck geometric distributed lag-form augmented Dickey-Fuller for unit root behavior (rejected), 
-5. Augmented Dickey-Fuller on cointegration difference term + Engle-Grander test for cointegration (failed to reject). 
+5. Augmented Dickey-Fuller on cointegration difference term + Engle-Granger test for cointegration (failed to reject). 
 
 ## Conclusion from tests
 Two I(1) series spawning a spurious colinear relationship. Remedy: Apply differencing and Prais-Winsten/Chochrane-Orcutt FGLS if estimates hold, then HAC errors to account for heteroskedasticity/autocorrelation.
