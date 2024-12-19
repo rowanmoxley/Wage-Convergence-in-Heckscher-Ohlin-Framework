@@ -1,4 +1,4 @@
-# Wage-Convergence-in-Heckscher-Ohlin-Framework
+# Wage Convergence in the Heckscher-Ohlin Model: Evidence from Puerto Rico
 Research submitted to the Midwest Economics Association undergraduate research competition.
 
 ## License
