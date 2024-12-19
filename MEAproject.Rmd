@@ -1,0 +1,429 @@
+---
+title: "Project"
+author: "Rowan Moxley"
+date: "2024-11-19"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r initialize, include=FALSE}
+library(pacman)
+p_load(dynlm, fUnitRoots, sandwich, broom, car, tidyverse, ggplot2, moments)
+load("prminwge.RData")
+
+
+## making PRMW variables for general use (lots of lags and logs)
+mfgwage <- data$mfgwage
+lmfwage <- log(mfgwage)
+lmfwage.ts <- ts(lmfwage, frequency=1, start=1950)
+glmfg <- diff(lmfwage.ts, lag=1)
+glmfg_mean <- mean(glmfg) 
+ts.plot(glmfg, glmfg_mean, main = "Growth Rate of PRMW") # looking more covariance stationary
+# lags of lmfgwage
+lmfwage_1 <- lag(lmfwage, 1)
+lmfwage_2 <- lag(lmfwage, 2)
+lmfwage_1.ts <- ts(lmfwage_1, frequency = 1, start=1950)
+lmfwage_2.ts <- ts(lmfwage_2, frequency=1, start=1950)
+# differenced lags for later use
+glmfg.df <- as.data.frame(glmfg)
+glmfg.df_1 <- lag(glmfg.df, 1)
+glmfg_1.ts <- ts(glmfg.df_1, frequency = 1, start = 1950)
+
+# make USGNP variables in similar fashion
+usgnp <- data$usgnp
+lusgnp <- log(usgnp)
+lusgnp.ts <- ts(lusgnp, frequency=1, start=1950)
+lusgnp_1 <- lag(lusgnp, 1)
+lusgnp_1.ts <- ts(lusgnp_1, frequency=1, start=1950)
+glusgnp.ts <- diff(lusgnp.ts, 1)
+glusgnp.df <- as.data.frame(glusgnp.ts)
+glusgnp_1.df <- lag(glusgnp.df,1)
+glusgnp_1.ts <- ts(glusgnp_1.df, frequency = 1, start = 1950)
+glusgnp_2.df <- lag(glusgnp_1.df, 1)
+glusgnp_2.ts <- ts(glusgnp_2.df, frequency = 1, start = 1950)
+glusnp_mean <- mean(glusgnp.ts)
+ts.plot(glusgnp.ts, glusnp_mean, main = "US GNP Growth Rates + Unconditional Mean")
+
+t <- data$t
+t.ts <- ts(t, frequency=1, start=1950)
+```
+
+
+
+
+```{r serial correlation, include=FALSE}
+# AR(1) autocorrelation test
+lm8 <- dynlm(lmfwage.ts ~ lusgnp.ts)
+resid_1 <- lm8$residuals
+resid_1.df <- as.data.frame(resid_1)
+resid_1_1.df <- lag(resid_1.df, 1)
+resid_1_1 <- ts(resid_1_1.df, frequency = 1, start = 1950)
+auto_c_lm1 <- dynlm(resid_1 ~ resid_1_1)
+summary(auto_c_lm1)
+plot.ts(resid_1)
+acf(resid_1, lag.max = 12, plot=TRUE)
+# rho of 0.8059, tiny p-value, reject H0: p = 0 in favor of serial correlation, could be a random walk or I(0) about a time trend. must check for unit root behavior next
+```
+
+```{r unit root tests, include=FALSE}
+## augmented Dickey-Fuller test for unit roots
+  # log Puerto Rican manufact. wages
+adfTest(lmfwage.ts, lags = 2, type = "ct") # note that i tried "nc" "c" and "ct", same results
+acf(lmfwage.ts, lag.max = 12, plot = TRUE)
+acf(lmfwage.ts, lag.max=12, plot=TRUE, type = "partial")
+
+  # log US GNP
+adfTest(lusgnp.ts, lags=2, type="ct")
+acf(lusgnp.ts, lag.max=12, plot=TRUE)
+acf(lusgnp.ts, lag.max=12, plot=TRUE, type = "partial")
+
+  # Koyck GDL-form augmented Dickey-Fuller test for unit roots
+lm11 <- dynlm(glmfg ~ lmfwage_1.ts + glmfg_1.ts + glusgnp_2.ts) 
+summary(lm11)
+
+
+## all fail to reject H0: theta = 0 in favor of the alternative, so strong evidence of unit roots in both processes
+
+### interpretation: lmfwage and lusgnp are likely I(1) or I(0) about a trend; either way, testing for cointegration is necessary here
+
+```
+
+```{r cointegration tests, include=FALSE}
+## a variety of cointegration tests. 
+  # augmented Dickey-Fuller test on cointegration difference term
+new <- lmfwage.ts - lusgnp.ts
+adfTest(new, lags=2, type="c")
+
+  # Engle-Granger with time trend
+test_lm <- dynlm(lmfwage.ts ~ t.ts + lusgnp.ts)
+u_hat <- test_lm$residuals
+adfTest(u_hat, lags=2, type="c")
+
+  # Engle-Granger with squared time trend
+t_sq.ts <- I(t.ts)^2
+lm13 <- dynlm(lmfwage.ts ~ lusgnp.ts + t.ts + t_sq.ts)
+summary(lm13)
+resid_eg <- lm13$residuals
+adfTest(resid_eg, lags =2, type = "ct")
+
+# all tests fail to reject H0: B = 0 or theta = 0, so insufficient evidence to conclude that the processes are I(0) about a time trend.
+
+```
+
+# till here, we have
+# ACF of two variables show time dependence
+# AR(1)s reject showing evidence of serial correlation
+# Dickey-Fullers on the tests fail to reject, evidence of unit root
+# augmented Dickey-Fuller on GDL with two lags show evidence of unit root
+# Engle-Granger with trend and squared trend failed to reject, no evidence of cointegration
+# Dickey-Fuller on cointegration term failed to reject, no evidence of cointegration
+
+# interpretation: we are dealing with two nonstationary, non-cointegrated I(1) processes, so first-differencing is warranted. Note the interaction term of two differenced I(1) processes will also be I(0). 
+
+### methodology going forward: Prais-Winsten FGLS if estimates hold, Newey-West HAC errors since there is strong evidence serial autocorrelation
+
+```{r first regression, include=FALSE}
+## first attempt: log-first-difference with USGNP + PR_US
+pr_us <-  glusgnp.ts * glmfg
+lm12 <- dynlm(glmfg ~ glusgnp.ts + pr_us)
+summary(lm12)
+ 
+ # F-test for joint significance
+lm12_ftest <- linearHypothesis(lm12, c("glusgnp.ts = 0", "pr_us = 0"), type = "F")
+lm12_ftest
+
+
+## checking assumptions with residuals
+
+# checking residuals for lm12
+plot.ts(lm12$residuals)
+acf(lm12$residuals, lag.max = 13, plot=TRUE)
+Box.test(lm12$residuals, lag = 3, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm12$residuals, lag = 4, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm12$residuals, lag = 5, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm12$residuals, lag = 6, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm12$residuals, lag = 7, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm12$residuals, lag = 8, type = c("Ljung-Box"), fitdf = 3)
+hist(lm12$residuals)
+
+```
+
+## clearly there is autocorrelation in the residuals. we will try three remedies: 
+## lag USGNP to capture more dynamics
+## use HAC errors- clear evidence of serial correlation and visual evidence of heteroskedasticity
+## use FGLS to estimate with no autocorrelation violation being violated
+
+```{r more tests for model dynamics, include=FALSE}
+
+# trying one lag for dynamic specificity
+lm13 <-  dynlm(glmfg ~ glusgnp.ts + pr_us + glusgnp_1.ts)
+summary(lm13)
+# hm
+
+# checking glusgnp autocorrelation 
+cor(glusgnp.ts, stats::lag(glusgnp_1.ts,k = 1), use = "complete.obs")
+acf(glusgnp.ts, lag.max=15, plot=TRUE)
+Box.test(glusgnp.ts, lag = 1, type = c("Ljung-Box"))
+# glusgnp is uncorrelated- no lag should be included, sample size too small
+
+# with one dummy var
+stagflation <- ifelse(data$year >= 1973 & data$year <= 1979, 1, 0)
+stagflation.ts <- ts(stagflation, frequency = 1, start=1950)
+lm16 <-  dynlm(glmfg ~ glusgnp.ts + pr_us + stagflation.ts) 
+summary(lm16)
+acf(lm16$residuals, lag.max = 15, plot=TRUE)
+hist(lm16$residuals)
+Box.test(lm16$residuals, lag = 4, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm16$residuals, lag = 5, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm16$residuals, lag = 6, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm16$residuals, lag = 7, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm16$residuals, lag = 8, type = c("Ljung-Box"), fitdf = 3)
+Box.test(lm16$residuals, lag = 9, type = c("Ljung-Box"), fitdf = 3)
+# closer...
+
+
+## trying with different dummy var
+deindust <- ifelse(data$year >= 1975 & data$year <= 1985, 1, 0)
+deindust.ts <- ts(stagflation, frequency = 1, start=1950)
+lm17 <- dynlm(glmfg ~ glusgnp.ts + pr_us + deindust.ts) 
+summary(lm17)
+acf(lm17$residuals, lag.max=15, plot=T)
+## not yet
+
+
+# trying with operation bootstrap dummy var
+operation_boostrap <- ifelse(data$year >= 1950 & data$year <= 1965, 1, 0)
+operation_boostrap.ts <- ts(operation_boostrap, frequency = 1, start=1950)
+data <- data %>% mutate(op_bs = operation_boostrap.ts)
+
+lm18 <- dynlm(glmfg ~ glusgnp.ts + pr_us + operation_boostrap.ts)
+acf(lm18$residuals, lag.max = 15, plot=T)
+summary(lm18)
+# nice now add more
+
+# with two dummy vars
+lm19 <- dynlm(glmfg ~ glusgnp.ts + pr_us + operation_boostrap.ts + stagflation.ts)
+summary(lm19)
+acf(lm19$residuals, lag.max = 15, plot=T)
+acf(lm19$residuals, lag.max = 15, plot=T, type = "partial")
+hist(lm19$residuals)
+plot.ts(lm19$residuals)
+## only one spike in ACF, two in PACF
+
+# F-tests for dummy var joint significance
+linearHypothesis(lm19, c("glusgnp.ts = 0", "pr_us = 0", "operation_boostrap.ts = 0", "stagflation.ts = 0"), type = "F")
+linearHypothesis(lm19, c("operation_boostrap.ts = 0", "stagflation.ts = 0"), type = "F")
+## higher adjusted R-square than all previous models, residuals more resemble white noise, and important structural changes are captured in the dummy vars. so this is the model to build off
+
+# making wage proportion of growth rates variable
+avgwage <- data$avgwage
+lavgwage <- log(avgwage)
+lavgwage <- ts(lavgwage, frequency = 1, start = 1950)
+gavgwage <- diff(lavgwage, lag = 1)
+glwp <- glmfg / gavgwage
+mean(glwp) # note: this is above 1! meaning growth rates outperform average wages if t-test holds
+
+# trying with wage proportion
+lm20 <- dynlm(glmfg ~ glusgnp.ts + pr_us + stagflation.ts + glwp)
+summary(lm20)
+# dub, highest R-square yet, we can assume inaccurate biasedness and efficiency from slight time dependence in the residuals, can be corrected with FGLS and HAC errors
+acf(lm20$residuals, lag.max = 15, plot=T)
+acf(lm20$residuals, lag.max = 15, plot=T, type = "partial")
+hist(lm20$residuals)
+plot.ts(lm20$residuals)
+gmfg_mean <- mean(glmfg)
+
+AIC(lm20)
+BIC(lm20)
+
+AIC(lm12)
+BIC(lm12)
+
+
+```
+## the glmfg mean is just barely higher than the intercept, meaning operation bootstrap lowers it slightly, but the significance remains the same. residuals look the most white noise, with only one spike in PACF/ACF, higher p-values in Ljung-Box, and lower BIC (negligible change in AIC), and mostly normally distributed. heteroskedasticity seems unaffected (and can be corrected with HAC errors.) so use this model and proceed with C-O or P-W FGLS, compare estimates, and our model is done. 
+
+
+```{r model estimation, include=FALSE}
+library(sandwich)
+library(prais)
+library(dplyr)
+
+## create a new dataframe to make the Prais-Winsten fitted model
+# make variables
+operation_bootstrap.ts.1 <- operation_boostrap.ts[-1]
+stagflation.ts.1 <- stagflation.ts[-1]
+glmfg.df1 <- as.data.frame(glmfg)
+glusgnp.ts.df1 <- as.data.frame(glusgnp.ts)
+pr_us.df1 <- as.data.frame(pr_us)
+operation_bootstrap.ts.df1 <- as.data.frame(operation_bootstrap.ts.1)
+stagflation.ts.df1 <- as.data.frame(stagflation.ts.1)
+glwp.df1 <- as.data.frame(glwp)
+
+# new dataframe
+data_df <- data.frame(
+  year = seq(1951, 1987, 1),
+  glmfg = glmfg.df1,
+  glusgnp = glusgnp.ts.df1,
+  op_bs_1 = operation_bootstrap.ts.df1,
+  stag_1 = stagflation.ts.df1,
+  glwp = glwp.df1,
+  pr_us = pr_us.df1
+ 
+)
+
+colnames(data_df) <- c("year", "glmfg", "glusgnp","operation_bootstrap.ts", "stagflation.ts", "glwp", "pr_us")
+
+# make PW variables of equal length
+glmfg.pw <- ts(data_df$glmfg, frequency = 1, start = 1951)
+glusgnp.pw <- ts(data_df$glusgnp, frequency = 1, start = 1951)
+operation_bootrstrap.ts.pw <- data_df$operation_bootstrap.ts
+stagflation.ts.pw <- data_df$stagflation.ts
+glwp.pw <- ts(data_df$glwp, frequency = 1, start = 1951)
+pr_us.pw <- ts(data_df$pr_us, frequency = 1, start = 1951)
+
+
+# note: this is lm20 just using data_df
+
+# compare these models for inclusion of interaction term
+lm21 <- dynlm(glmfg.pw ~ operation_bootrstrap.ts.pw + stagflation.ts.pw + glwp.pw + pr_us.pw)
+
+lm22 <- dynlm(glmfg.pw ~ glusgnp.pw + operation_bootrstrap.ts.pw + stagflation.ts.pw + glwp.pw)
+
+# extremely correlative before differencing
+# maybe log-transformed interaction term?
+prus.df <-lusgnp.ts * lmfwage.ts 
+prus.pw <- prus.df[-1]
+
+summary(lm21)
+summary(lm22)
+
+
+lm21_aic <- AIC(lm21)
+lm21_bic <- BIC(lm21)
+
+
+lm22_aic <- AIC(lm22)
+lm22_bic <- BIC(lm22)
+
+# lm22 is better
+
+hist(lm21$residuals)
+hist(lm22$residuals)
+lm22_skewness <- skewness(lm22$residuals)
+lm21_skewness <- skewness(lm21$residuals)
+# lm 21 is better hmmmmmmmm
+
+acf(lm21$residuals)
+acf(lm22$residuals)
+# lm21 wins barely
+
+lm22_resid_mean <- mean(lm22$residuals)
+lm21_resid_mean <- mean(lm21$residuals)
+# negligably similar
+lm100 <- lm(mfgwage ~ usgnp)
+summary(lm100)
+
+
+## F-test on lm22
+
+
+
+plot.ts(lm21$residuals)
+plot.ts(glwp.pw)
+plot.ts(glmfg.pw)
+mean(glwp.pw)
+## after everything
+## everything the same but in a dataframe fitting the P-W estimation
+## we can now proceed with our final estimation
+```
+
+```{r summary statistics, include=FALSE}
+
+
+# some summary statistics
+data_summary <- c(
+  Mean = mean(glmfg.pw, na.rm = TRUE),
+  Median = median(glmfg.pw, na.rm = TRUE),
+  Maximum = max(glmfg.pw, na.rm = TRUE),
+  Minimum = min(glmfg.pw, na.rm = TRUE),
+  SD = sd(glmfg.pw, na.rm = TRUE)
+)
+
+
+print(data_summary)
+
+data_summary_2 <- c(
+  Mean = mean(glusgnp.pw, na.rm = TRUE),
+  Median = median(glusgnp.pw, na.rm = TRUE),
+  Maximum = max(glusgnp.pw, na.rm = TRUE),
+  Minimum = min(glusgnp.pw, na.rm = TRUE),
+  SD = sd(glusgnp.pw, na.rm = TRUE)
+)
+print(data_summary_2)
+
+data_summary_3 <- c(
+  Mean = mean(glwp.pw, na.rm = TRUE),
+  Median = median(glwp.pw, na.rm = TRUE),
+  Maximum = max(glwp.pw, na.rm = TRUE),
+  Minimum = min(glwp.pw, na.rm = TRUE),
+  SD = sd(glwp.pw, na.rm = TRUE)
+)
+print(data_summary_3)
+
+
+
+
+# pearson correlation
+cor(glmfg.pw, glwp.pw)
+
+```
+``` {r final chunk, include=FALSE}
+final_lm_pw <- prais_winsten(lm22, data = data_df, index = "year")
+summary(final_lm_pw)
+## p-w estimation changes too many of the estimates; use original regression with HAC errors
+
+# Newey-West covariance matrix
+final_lm_pw_nwcov <- NeweyWest(lm22, lag = 2, prewhite = FALSE)
+
+## OLS regression fitted with Newey-West HAC standard errors
+r_1 <- coeftest(lm22, vcov = final_lm_pw_nwcov)
+print(r_1)
+# ......fuck yea
+```
+
+``` {r check model, include=FALSE}
+p_load(easystats, patchwork)
+
+
+realred <- lm22$residuals
+hist(realred)
+acf(realred, lag.max=15, plot=TRUE)
+Box.test(realred, lag = 11, type = c("Ljung-Box"))
+ts.plot(glusgnp.pw, realred, main = "Fake Heteroskedasticity Graph")
+
+check_model(lm22)
+
+# looks pretty damn good, presence of heteroskedasticity but adjusted for with HAC errors (no need for GLS/WLS)
+
+```
+## note: our HAC errors reacted exactly as predicted from how serial correlation affects our SEs: HAC corrects and brings SEs down, increasing T-stats, decreasing p-values, and finally increasing significance. we see glwp.pw as significant now, meaning our wage proportion is statistically valid. Also note that this model has the highest adjusted R-square and has the most covariance stationary or white-noise-y residuals, meaning we have minimized the things influencing our estimatation (mostly serial correlation in this case) 
+
+# logical flow of the project:
+
+highly trending series (graphs)
+confirmed autocorrelation and unit root behavior (AR(1), augmented Dickey-Fullers, Ljung-Box, and ACFs)
+no cointegration (adf, Engle-Grangers)
+first difference to remove persistent behavior (graphs and mathematical logic)
+start estimating until we get the model we want
+we have maximized model fit to this point by minimizing the time dependence in the residuals by correcting for much of the autocorrelative behavior and including as many predictors as possible to get it down to one spike in both the ACF and PACF
+remaining inefficiency: heteroskedasticity (graph) and autocorrelation (ACF of residuals)
+remaining biasedness: something causing dependence in the residuals (nonconstant expected value E(ut|x1t, x2t, ... , xnt)) 
+final remedies: FGLS for serial correlation mostly and obtaining better estimates
+HAC errors for heteroskedasticity
+our estimates remain the same so it is clear inefficiency is our biggest risk
+after correcting for those we are left with a very nicely significant model with a good adjusted R-square
+
